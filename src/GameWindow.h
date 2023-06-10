@@ -1,16 +1,17 @@
-#ifndef WINDOW_H
-#define WINDOW_H
+#ifndef GAMEWINDOW_H
+#define GAMEWINDOW_H
 #define GLFW_INCLUDE_VULKAN
 
 #include <GLFW/glfw3.h>
 #include <string>
+#include <stdexcept>
 
-class Window{
+class GameWindow{
 public:
-	Window(int w, int h, std::string name)
+	GameWindow(int w, int h, std::string name)
 	: width(w), height(h), windowName(name) {Init();}
 
-	~Window(){
+	~GameWindow(){
 		glfwDestroyWindow(window);
 		glfwTerminate();
 	}
@@ -18,6 +19,12 @@ public:
 	void Run(){
 		while(!glfwWindowShouldClose(window)){
 			glfwPollEvents();
+		}
+	}
+
+	void createWindowSurface(VkInstance instance, VkSurfaceKHR *surface){
+		if (glfwCreateWindowSurface(instance, window, nullptr, surface) != VK_SUCCESS){
+			throw std::runtime_error("failed to create a window surface");
 		}
 	}
 
