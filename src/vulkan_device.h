@@ -46,7 +46,7 @@ public:
 		vkDestroyDevice(device_, nullptr);
 
 		if (enableValidationLayers) {
-			DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nullptr);
+			vkDestroyDebugUtilsMessengerEXT(instance, debugMessenger, nullptr);
 		}
 
 		vkDestroySurfaceKHR(instance, surface_, nullptr);
