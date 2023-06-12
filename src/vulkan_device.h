@@ -32,8 +32,26 @@ class EngineDevice {
 public:
 	const bool enableValidationLayers = true; // set false for distrobution
 
-	EngineDevice(GameWindow &window);
-	~EngineDevice();
+	EngineDevice(GameWindow &window) : window{window} {
+		createInstance();
+		setupDebugMessenger();
+		createSurface();
+		pickPhysicalDevice();
+		createLogicalDevice();
+		createCommandPool();
+	}
+
+	~EngineDevice() {
+		vkDestroyCommandPool(device_, commandPool, nullptr);
+		vkDestroyDevice(device_, nullptr);
+
+		if (enableValidationLayers) {
+			DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nullptr);
+		}
+
+		vkDestroySurfaceKHR(instance, surface_, nullptr);
+		vkDestroyInstance(instance, nullptr);
+	}
 
 	// Not copyable or movable
 	EngineDevice(const EngineDevice &) = delete;
