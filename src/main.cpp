@@ -1,36 +1,26 @@
 #define GLFW_INCLUDE_VULKAN
-#include <vulkan/vulkan.h>
-#include <GLFW/glfw3.h>
-#include <iostream>
 
-#include "GameWindow.h"
-//#include "camera.h"
-//#include "Vector.h"
-//#include "renderer.h"
-#include "pipeline.h"
+#include <iostream>
+#include <cstdlib>
+#include <stdexcept>
+
+#include "App.h"
 
 int main() 
 {
 
-    int width = 800;
-    int height = 600;
 
-    GameWindow window(width, height, "Minecraft");
-    window.Run();
+    Engine::App app{};
 
-    // Render Pipeline
-    RenderPipeline renderPipeline("shaders/shader.vert.spv", "shaders/shader.frag.spv");
-
-    //uint32_t extensionCount = 0;
-    //vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, nullptr);
+    try{
+        app.run();
+    }
+    catch (const std::exception &e){
+        return EXIT_FAILURE;
+    }
 
 
-    // Set up camera
-
-    //Vector camPos(0, 0, 0);
-    //Vector canRot(0, 0, 0);
-    //Camera camera(camPos, camRot, width, height);
-    return 0;
+    return EXIT_SUCCESS;
 }
 
 // cd ..
