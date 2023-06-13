@@ -58,8 +58,8 @@ public:
         }
     }
 
-    MyEngineSwapChain(const MyEngineSwapChain &) = delete;
-    void operator=(const MyEngineSwapChain &) = delete;
+    EngineSwapChain(const EngineSwapChain &) = delete;
+    void operator=(const EngineSwapChain &) = delete;
 
     VkFramebuffer getFrameBuffer(int index) { return swapChainFramebuffers[index]; }
     VkRenderPass getRenderPass() { return renderPass; }
@@ -73,7 +73,12 @@ public:
     float extentAspectRatio() {
       return static_cast<float>(swapChainExtent.width) / static_cast<float>(swapChainExtent.height);
     }
-    VkFormat findDepthFormat();
+    VkFormat findDepthFormat(){
+        return device.findSupportedFormat(
+            {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT},
+            VK_IMAGE_TILING_OPTIMAL,
+            VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
+    }
 
     VkResult acquireNextImage(uint32_t *imageIndex){
         vkWaitForFences(
@@ -438,3 +443,6 @@ private:
 };
 
 }  // namespace 
+
+
+#endif
