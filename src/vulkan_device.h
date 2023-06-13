@@ -93,10 +93,39 @@ public:
 	VkQueue presentQueue() { return presentQueue_; }
 
 	SwapChainSupportDetails getSwapChainSupport() { return querySwapChainSupport(physicalDevice); }
-	uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
+
+	uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties){
+		VkPhysicalDeviceMemoryProperties memProperties;
+		vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
+		for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+			if ((typeFilter & (1 << i)) &&
+				(memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+				return i;
+			}
+  		}
+  		throw std::runtime_error("failed to find suitable memory type!");
+	}
+
 	QueueFamilyIndices findPhysicalQueueFamilies() { return findQueueFamilies(physicalDevice); }
+
 	VkFormat findSupportedFormat(
-	    const std::vector<VkFormat> &candidates, VkImageTiling tiling, VkFormatFeatureFlags features);
+	    const std::vector<VkFormat> &candidates, 
+	    VkImageTiling tiling, 
+	    VkFormatFeatureFlags features)
+	{
+		for (VkFormat format : candidates) {
+			VkFormatProperties props;
+			vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &props);
+
+			if (tiling == VK_IMAGE_TILING_LINEAR && (props.linearTilingFeatures & features) == features) {
+		  		return format;
+			} 
+			else if (tiling == VK_IMAGE_TILING_OPTIMAL && (props.optimalTilingFeatures & features) == features) {
+		  		return format;
+			}
+		}
+		throw std::runtime_error("failed to find supported format!");
+	}
 
 	// Buffer Helper Functions
 	void createBuffer(
@@ -115,7 +144,28 @@ public:
 	    const VkImageCreateInfo &imageInfo,
 	    VkMemoryPropertyFlags properties,
 	    VkImage &image,
-	    VkDeviceMemory &imageMemory);
+	    VkDeviceMemory &imageMemory)
+	{
+		if (vkCreateImage(device_, &imageInfo, nullptr, &image) != VK_SUCCESS) {
+    		throw std::runtime_error("failed to create image!");
+  		}
+
+		VkMemoryRequirements memRequirements;
+		vkGetImageMemoryRequirements(device_, image, &memRequirements);
+
+		VkMemoryAllocateInfo allocInfo{};
+		allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		allocInfo.allocationSize = memRequirements.size;
+		allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties);
+
+		if (vkAllocateMemory(device_, &allocInfo, nullptr, &imageMemory) != VK_SUCCESS) {
+			throw std::runtime_error("failed to allocate image memory!");
+		}
+
+		if (vkBindImageMemory(device_, image, imageMemory, 0) != VK_SUCCESS) {
+			throw std::runtime_error("failed to bind image memory!");
+		}
+	}
 
 	VkPhysicalDeviceProperties properties;
 
