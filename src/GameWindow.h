@@ -19,11 +19,7 @@ public:
 	GameWindow(const GameWindow &) = delete;
 	GameWindow &operator=(const GameWindow &) = delete;
 
-	void Run(){
-		while(!glfwWindowShouldClose(window)){
-			glfwPollEvents();
-		}
-	}
+	bool shouldClose() {return glfwWindowShouldClose(window);}
 
 	void createWindowSurface(VkInstance instance, VkSurfaceKHR *surface){
 		if (glfwCreateWindowSurface(instance, window, nullptr, surface) != VK_SUCCESS){
