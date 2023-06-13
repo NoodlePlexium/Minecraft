@@ -13,7 +13,6 @@ linkFlags = -L lib/$(platform) -lglfw3
 compileFlags := -std=c++17 $(includes)
 
 ifeq ($(OS),Windows_NT)
-
 	LIB_EXT = .lib
 	CMAKE_CMD = cmake -G "MinGW Makefiles" .
 
@@ -29,60 +28,17 @@ ifeq ($(OS),Windows_NT)
 	MKDIR := -mkdir -p
 	RM := -del /q
 	COPY = -robocopy "$(call platformpth,$1)" "$(call platformpth,$2)" $3
-else 
-	UNAMEOS := $(shell uname)
-	ifeq ($(UNAMEOS), Linux)
-		
-		LIB_EXT :=
-		
-		vulkanLib := vulkan.so
-		vulkanLink := -lvulkan
-
-		vulkanExports := export VK_LAYER_PATH=$(VULKAN_SDK)/etc/explicit_layer.d
-
-		platform := Linux
-		CXX ?= g++
-		linkFlags += $(vulkanLink) -ldl -lpthread -lX11 -lXxf86vm -lXrandr -lXi
-	endif
-	ifeq ($(UNAMEOS), Darwin)
-		
-		LIB_EXT := .dylib
-		
-		vulkanLib := vulkan.1
-		vulkanLibVersion := $(patsubst %.0,%,$(VK_VERSION))
-		vulkanLink := -l $(vulkanLib) -l vulkan.$(vulkanLibVersion)
-
-		vulkanExports := export export VK_ICD_FILENAMES=$(VULKAN_SDK)/share/vulkan/icd.d/MoltenVK_icd.json; \ 
-						export VK_LAYER_PATH=$(VULKAN_SDK)/share/vulkan/explicit_layer.d
-		macOSVulkanLib = $(call COPY, $(VULKAN_SDK)/lib, lib/$(platform),libvulkan.$(vulkanLibVersion)$(LIB_EXT))
-
-		platform := macOS
-		CXX ?= clang++
-		linkFlags += $(vulkanLink) -framework CoreVideo -framework IOKit -framework Cocoa -framework GLUT -framework OpenGL
-	endif
-	
-	vulkanLibDir := lib
-
-	vulkanLibDir := lib
-	vulkanLibPrefix := $(vulkanLibDir)
-	CMAKE_CMD = cmake .
-
-	PATHSEP := /
-	MKDIR = mkdir -p
-	COPY = cp $1$(PATHSEP)$3 $2
-	THEN = ;
-	RM := rm -rf
 endif
 
 # Lists phony targets for Makefile
-.PHONY: all setup submodules execute clean
+.PHONY: all setup submodules execute clean shaders
 
 all: $(target) execute clean
 
 submodules:
 	git submodule update --init --recursive
 
-setup: submodules lib
+setup: submodules lib shaders
 
 lib:
 	cd vendor/glfw $(THEN) $(CMAKE_CMD) $(THEN) "$(MAKE)" 
@@ -111,3 +67,12 @@ execute:
 
 clean: 
 	$(RM) $(call platformpth, $(buildDir)/*)
+
+shaders: $(patsubst shaders/%.vert, shaders/%.vert.spv, $(wildcard shaders/*.vert)) \
+         $(patsubst shaders/%.frag, shaders/%.frag.spv, $(wildcard shaders/*.frag))
+
+shaders/%.vert.spv: shaders/%.vert
+	$(VULKAN_SDK)/Bin/glslc.exe $< -o $@
+
+shaders/%.frag.spv: shaders/%.frag
+	$(VULKAN_SDK)/Bin/glslc.exe $< -o $@
