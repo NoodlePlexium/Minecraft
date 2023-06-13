@@ -16,6 +16,9 @@ public:
 		glfwTerminate();
 	}
 
+	GameWindow(const GameWindow &) = delete;
+	GameWindow &operator=(const GameWindow &) = delete;
+
 	void Run(){
 		while(!glfwWindowShouldClose(window)){
 			glfwPollEvents();
@@ -27,6 +30,8 @@ public:
 			throw std::runtime_error("failed to create a window surface");
 		}
 	}
+
+	VkExtent2D getExtent() {return {static_cast<uint32_t>(width), static_cast<uint32_t>(height)};}
 
 
 private:
