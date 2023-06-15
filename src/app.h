@@ -1,17 +1,26 @@
 #ifndef APP_H
 #define APP_H
 
+#define GLM_FORCE_RADIANS
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#include "../vendor/glm/glm.hpp"
+#include "../vendor/glm/gtc/constants.hpp"
+
 #include "GameWindow.h"
-#include "pipeline.h"
-#include "engine_swap_chain.h"
+#include "renderer.h"
 #include "engine_device.h"
 #include "engine_model.h"
+#include "engine_game_object.h"
+#include "render_system.h"
+#include "camera.h"
+#include "InputSystem.h"
 
 #include <memory>
 #include <vector>
 #include <iostream>
 #include <stdexcept>
 #include <array>
+#include <chrono>
 
 namespace Engine{
 
@@ -20,142 +29,168 @@ public:
 	static constexpr int width = 800;
 	static constexpr int height = 600;
 
-	App() 
-	{
-		loadModels();
-		createPipelineLayout();
-		createPipeline();
-		createCommandBuffers();
-	}
+	App() {loadGameObjects();}
 
-
-	~App() {vkDestroyPipelineLayout(engineDevice.device(), pipelineLayout, nullptr);}
+	~App() {}
 	
 	App(const App &) = delete;
 	App &operator=(const App &) = delete;	
 
 
-	void run(){
-		while(!window.shouldClose()){
-			glfwPollEvents();
-			drawFrame();
-		}
+	void run() {
 
-		vkDeviceWaitIdle(engineDevice.device());
+	    // internal
+	    float aspect = renderer.getAspectRatio();
+	    auto currentTime = std::chrono::high_resolution_clock::now();
+	    float deltaTime;
+
+	    // SCRIPTABLE ZONE //////////////////////////////////////////////////
+	    Camera camera{};
+	    camera.setPerspectiveProjection(aspect);
+	    float camPitch;
+	    InputSystem input{window.getGLFWwindow()};
+	    input.setMouseModePlay();
+
+	    auto Update = [&]() {
+
+	    	// Update input system state
+	    	input.UpdateInputs();
+	  
+
+	    	glm::vec2 moveInput = input.Movement() * 3.0f * deltaTime;
+	    	glm::vec2 mouseLook = input.MouseLook() * 0.00045f;
+
+	    	glm::vec3 move = moveInput.x * camera.Right() + glm::vec3(0.0f, input.MovementY() * 3.0f * deltaTime, 0.0f) + moveInput.y * camera.Forward();
+	    	glm::vec3 rot{mouseLook.y, -mouseLook.x, 0.0f};
+
+
+	    	camera.position += move;
+
+	    	std::cout << move.x << std::endl;
+	    	camera.rotation += rot;
+	    	camera.rotation.x = glm::clamp(camera.rotation.x, -glm::pi<float>() * 0.5f, glm::pi<float>() * 0.5f); // clamp
+
+
+
+			// set camera view
+			camera.setView();
+			aspect = renderer.getAspectRatio();
+			camera.setPerspectiveProjection(aspect);
+	    };
+	    /////////////////////////////////////////////////////////////////////
+
+	    // INTERNAL LOOP RUNS ONCE PER FRAME ///////////////////////////////
+	    RenderSystem renderSystem{engineDevice, renderer.getSwapChainRenderPass()};
+	    while (!window.shouldClose()) {
+	        glfwPollEvents();
+
+	        // calculates time elapsed since last frame
+	        auto newTime = std::chrono::high_resolution_clock::now();
+	        deltaTime = std::chrono::duration<float, std::chrono::seconds::period>(newTime - currentTime).count();
+	        currentTime = newTime;
+
+	        // execute scripts before rendering to screen
+	        Update();
+
+	        if (auto commandBuffer = renderer.beginFrame()) {
+	            renderer.beginSwapChainRenderPass(commandBuffer);
+	            renderSystem.renderGameObjects(commandBuffer, gameObjects, camera);
+	            renderer.endSwapChainRenderPass(commandBuffer);
+	            renderer.endFrame();
+	        }
+	    }
+	    vkDeviceWaitIdle(engineDevice.device());
 	}
+
 
 
 private:
 
-	void loadModels(){
-		std::vector<EngineModel::Vertex> vertices {
-			{{0.0f, -0.5f}},
-			{{0.5f, 0.5f}},
-			{{-0.5f, 0.5f}}
-		};
+	// temporary helper function, creates a 1x1x1 cube centered at offset
+	std::unique_ptr<EngineModel> createCubeModel(EngineDevice& device, glm::vec3 offset) {
+	std::vector<EngineModel::Vertex> vertices{
 
-		engineModel = std::make_unique<EngineModel>(engineDevice, vertices);
+	  // left face (white)
+	  {{-.5f, -.5f, -.5f}, {.9f, .9f, .9f}},
+	  {{-.5f, .5f, .5f}, {.9f, .9f, .9f}},
+	  {{-.5f, -.5f, .5f}, {.9f, .9f, .9f}},
+	  {{-.5f, -.5f, -.5f}, {.9f, .9f, .9f}},
+	  {{-.5f, .5f, -.5f}, {.9f, .9f, .9f}},
+	  {{-.5f, .5f, .5f}, {.9f, .9f, .9f}},
+
+	  // right face (yellow)
+	  {{.5f, -.5f, -.5f}, {.8f, .8f, .1f}},
+	  {{.5f, .5f, .5f}, {.8f, .8f, .1f}},
+	  {{.5f, -.5f, .5f}, {.8f, .8f, .1f}},
+	  {{.5f, -.5f, -.5f}, {.8f, .8f, .1f}},
+	  {{.5f, .5f, -.5f}, {.8f, .8f, .1f}},
+	  {{.5f, .5f, .5f}, {.8f, .8f, .1f}},
+
+	  // top face (orange, remember y axis points down)
+	  {{-.5f, -.5f, -.5f}, {.9f, .6f, .1f}},
+	  {{.5f, -.5f, .5f}, {.9f, .6f, .1f}},
+	  {{-.5f, -.5f, .5f}, {.9f, .6f, .1f}},
+	  {{-.5f, -.5f, -.5f}, {.9f, .6f, .1f}},
+	  {{.5f, -.5f, -.5f}, {.9f, .6f, .1f}},
+	  {{.5f, -.5f, .5f}, {.9f, .6f, .1f}},
+
+	  // bottom face (red)
+	  {{-.5f, .5f, -.5f}, {.8f, .1f, .1f}},
+	  {{.5f, .5f, .5f}, {.8f, .1f, .1f}},
+	  {{-.5f, .5f, .5f}, {.8f, .1f, .1f}},
+	  {{-.5f, .5f, -.5f}, {.8f, .1f, .1f}},
+	  {{.5f, .5f, -.5f}, {.8f, .1f, .1f}},
+	  {{.5f, .5f, .5f}, {.8f, .1f, .1f}},
+
+	  // nose face (blue)
+	  {{-.5f, -.5f, 0.5f}, {.1f, .1f, .8f}},
+	  {{.5f, .5f, 0.5f}, {.1f, .1f, .8f}},
+	  {{-.5f, .5f, 0.5f}, {.1f, .1f, .8f}},
+	  {{-.5f, -.5f, 0.5f}, {.1f, .1f, .8f}},
+	  {{.5f, -.5f, 0.5f}, {.1f, .1f, .8f}},
+	  {{.5f, .5f, 0.5f}, {.1f, .1f, .8f}},
+
+	  // tail face (green)
+	  {{-.5f, -.5f, -0.5f}, {.1f, .8f, .1f}},
+	  {{.5f, .5f, -0.5f}, {.1f, .8f, .1f}},
+	  {{-.5f, .5f, -0.5f}, {.1f, .8f, .1f}},
+	  {{-.5f, -.5f, -0.5f}, {.1f, .8f, .1f}},
+	  {{.5f, -.5f, -0.5f}, {.1f, .8f, .1f}},
+	  {{.5f, .5f, -0.5f}, {.1f, .8f, .1f}},
+
+	};
+	for (auto& v : vertices) {
+	v.position += offset;
+	}
+	return std::make_unique<EngineModel>(device, vertices);
 	}
 
-	void createPipelineLayout(){
-		VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
-		pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-		pipelineLayoutInfo.setLayoutCount = 0;
-		pipelineLayoutInfo.pSetLayouts = nullptr;
-		pipelineLayoutInfo.pushConstantRangeCount = 0;
-		pipelineLayoutInfo.pPushConstantRanges = nullptr;
-		if (vkCreatePipelineLayout(engineDevice.device(), &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS){
-			throw std::runtime_error("failed to create pipeline layout!");
-		}
-	}
-
-	void createPipeline(){
-
-		std::cout << "Width: " << engineSwapChain.getSwapChainExtent().width << std::endl;
-
-
-		auto pipelineConfig = 
-			GraphicsPipeline::defaultPipelineConfigInfo(engineSwapChain.getSwapChainExtent().width, engineSwapChain.getSwapChainExtent().height);
-
-		pipelineConfig.renderPass  = engineSwapChain.getRenderPass();	
-		pipelineConfig.pipelineLayout = pipelineLayout;
-		graphicsPipeline = std::make_unique<GraphicsPipeline>(
-			engineDevice, 
-			"shaders/shader.vert.spv", 
-			"shaders/shader.frag.spv", 
-			pipelineConfig);
-	}
-
-	void createCommandBuffers() {
-		commandBuffers.resize(engineSwapChain.imageCount());
-
-		VkCommandBufferAllocateInfo allocInfo{};
-		allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-		allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		allocInfo.commandPool = engineDevice.getCommandPool();
-		allocInfo.commandBufferCount = static_cast<uint32_t>(commandBuffers.size());
-
-		if (vkAllocateCommandBuffers(engineDevice.device(), &allocInfo, commandBuffers.data()) != VK_SUCCESS){
-			throw std::runtime_error("failed to allocate command buffers!");
-		}
-
-		for (int i = 0; i < commandBuffers.size(); i++){
-			VkCommandBufferBeginInfo beginInfo{};
-			beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-			if (vkBeginCommandBuffer(commandBuffers[i], &beginInfo) != VK_SUCCESS){
-				throw std::runtime_error("failed to begin recording command buffer!");
-			}
-
-			VkRenderPassBeginInfo renderPassInfo{};
-			renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-			renderPassInfo.renderPass = engineSwapChain.getRenderPass();
-			renderPassInfo.framebuffer = engineSwapChain.getFrameBuffer(i);
-
-			renderPassInfo.renderArea.offset = {0, 0};
-			renderPassInfo.renderArea.extent = engineSwapChain.getSwapChainExtent();
-
-			std::array<VkClearValue, 2> clearValues{};
-			clearValues[0].color = {0.1f, 0.1f, 0.1f, 0.1f};
-			clearValues[1].depthStencil = {1.0f, 0};
-			renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
-			renderPassInfo.pClearValues = clearValues.data();
-
-			vkCmdBeginRenderPass(commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);	
-			
-			graphicsPipeline->bind(commandBuffers[i]);
-			engineModel->bind(commandBuffers[i]);
-			engineModel->draw(commandBuffers[i]);
-
-			vkCmdEndRenderPass(commandBuffers[i]);
-			if (vkEndCommandBuffer(commandBuffers[i]) != VK_SUCCESS){
-				throw std::runtime_error("failed to record command buffer!");
+	void loadGameObjects(){
+		std::shared_ptr<EngineModel> engineModel = createCubeModel(engineDevice, {0.0f, 0.0f, 0.0f});
+		for (int x =- 10; x < 10; x++){
+			for (int i= -10; i < 10; i++){
+				auto cube = EngineGameObject::createGameObject();
+				cube.model = engineModel;
+				cube.transform.translation = {0.0f + i, 0 + (i + x) * 0.2f, 0.0f + x};
+				cube.transform.scale = {1.0f, 1.0f, 1.0f};
+				gameObjects.push_back(std::move(cube));
 			}
 		}
 	}
 
-	void drawFrame() {
-		uint32_t imageIndex;
-		auto result = engineSwapChain.acquireNextImage(&imageIndex);
 
-		if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR){
-			throw std::runtime_error("failed to aquire swap chain image!");
-		}
+	void Start(){
 
-		result = engineSwapChain.submitCommandBuffers(&commandBuffers[imageIndex], &imageIndex);
-		if (result != VK_SUCCESS){
-			throw std::runtime_error("failed to present swap chain image!");
-		}
 	}
 
+	void Update(float deltaTime){
+
+	}
 
 	GameWindow window{width, height, "Minecraft"};
     EngineDevice engineDevice{window};
-    EngineSwapChain engineSwapChain{engineDevice, window.getExtent()};
-    std::unique_ptr<GraphicsPipeline> graphicsPipeline;
-    VkPipelineLayout pipelineLayout;
-    std::vector<VkCommandBuffer> commandBuffers;
-    std::unique_ptr<EngineModel> engineModel;
+    Renderer renderer{window, engineDevice};
+    std::vector<EngineGameObject> gameObjects;
 };
 
 
