@@ -1,6 +1,7 @@
 #ifndef ENGINE_SWAP_CHAIN_H
 #define ENGINE_SWAP_CHAIN_H
 
+#include "engine_device.h"
 #include <vulkan/vulkan.h>
 #include <array>
 #include <cstdlib>
@@ -11,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <memory>
 
 namespace Engine {
 
@@ -20,12 +22,12 @@ public:
 
     EngineSwapChain(EngineDevice &deviceRef, VkExtent2D extent)
     : device{deviceRef}, windowExtent{extent} {
-        createSwapChain();
-        createImageViews();
-        createRenderPass();
-        createDepthResources();
-        createFramebuffers();
-        createSyncObjects();
+        Init();
+    }
+    EngineSwapChain(EngineDevice &deviceRef, VkExtent2D extent, std::shared_ptr<EngineSwapChain> previous)
+    : device{deviceRef}, windowExtent{extent}, oldSwapChain{previous} {
+        Init();
+        oldSwapChain = nullptr;
     }
     ~EngineSwapChain() {
         for (auto imageView : swapChainImageViews) {
@@ -59,7 +61,7 @@ public:
     }
 
     EngineSwapChain(const EngineSwapChain &) = delete;
-    void operator=(const EngineSwapChain &) = delete;
+    EngineSwapChain &operator=(const EngineSwapChain &) = delete;
 
     VkFramebuffer getFrameBuffer(int index) { return swapChainFramebuffers[index]; }
     VkRenderPass getRenderPass() { return renderPass; }
@@ -145,7 +147,23 @@ public:
         return result;
     }
 
+    bool compareSwapFormats(const EngineSwapChain &swapChain) const {
+        return 
+            swapChain.swapChainDepthFormat == swapChainDepthFormat && 
+            swapChain.swapChainImageFormat == swapChainImageFormat;
+    }
+
 private:
+
+    void Init(){
+        createSwapChain();
+        createImageViews();
+        createRenderPass();
+        createDepthResources();
+        createFramebuffers();
+        createSyncObjects();
+    }
+
     void createSwapChain(){
         SwapChainSupportDetails swapChainSupport = device.getSwapChainSupport();
         VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(swapChainSupport.formats);
@@ -189,7 +207,7 @@ private:
         createInfo.presentMode = presentMode;
         createInfo.clipped = VK_TRUE;
 
-        createInfo.oldSwapchain = VK_NULL_HANDLE;
+        createInfo.oldSwapchain = oldSwapChain == nullptr ? VK_NULL_HANDLE : oldSwapChain->swapChain;
 
         if (vkCreateSwapchainKHR(device.device(), &createInfo, nullptr, &swapChain) != VK_SUCCESS) {
             throw std::runtime_error("failed to create swap chain!");
@@ -228,6 +246,7 @@ private:
     }
     void createDepthResources(){
         VkFormat depthFormat = findDepthFormat();
+        swapChainDepthFormat = depthFormat;
         VkExtent2D swapChainExtent = getSwapChainExtent();
 
         depthImages.resize(imageCount());
@@ -375,7 +394,7 @@ private:
     // Helper functions
     VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR> &availableFormats){
         for (const auto &availableFormat : availableFormats) {
-            if (availableFormat.format == VK_FORMAT_B8G8R8A8_UNORM &&
+            if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB &&
                 availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
             return availableFormat;
             }
@@ -419,6 +438,7 @@ private:
     }
 
     VkFormat swapChainImageFormat;
+    VkFormat swapChainDepthFormat;
     VkExtent2D swapChainExtent;
 
     std::vector<VkFramebuffer> swapChainFramebuffers;
@@ -434,6 +454,7 @@ private:
     VkExtent2D windowExtent;
 
     VkSwapchainKHR swapChain;
+    std::shared_ptr<EngineSwapChain> oldSwapChain;
 
     std::vector<VkSemaphore> imageAvailableSemaphores;
     std::vector<VkSemaphore> renderFinishedSemaphores;
