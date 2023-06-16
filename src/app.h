@@ -9,11 +9,12 @@
 #include "GameWindow.h"
 #include "renderer.h"
 #include "engine_device.h"
-#include "engine_model.h"
+#include "engine_mesh.h"
 #include "engine_game_object.h"
 #include "render_system.h"
 #include "camera.h"
 #include "InputSystem.h"
+#include "terrain_mesh.h"
 
 #include <memory>
 #include <vector>
@@ -57,10 +58,10 @@ public:
 	    	input.UpdateInputs();
 	  
 
-	    	glm::vec2 moveInput = input.Movement() * 3.0f * deltaTime;
+	    	glm::vec2 moveInput = input.Movement() * 6.0f * deltaTime;
 	    	glm::vec2 mouseLook = input.MouseLook() * 0.00045f;
 
-	    	glm::vec3 move = moveInput.x * camera.Right() + glm::vec3(0.0f, input.MovementY() * 3.0f * deltaTime, 0.0f) + moveInput.y * camera.Forward();
+	    	glm::vec3 move = moveInput.x * camera.Right() + glm::vec3(0.0f, input.MovementY() * 6.0f * deltaTime, 0.0f) + moveInput.y * camera.Forward();
 	    	glm::vec3 rot{mouseLook.y, -mouseLook.x, 0.0f};
 
 
@@ -106,76 +107,15 @@ public:
 
 private:
 
-	// temporary helper function, creates a 1x1x1 cube centered at offset
-	std::unique_ptr<EngineModel> createCubeModel(EngineDevice& device, glm::vec3 offset) {
-	std::vector<EngineModel::Vertex> vertices{
-
-	  // left face (white)
-	  {{-.5f, -.5f, -.5f}, {.9f, .9f, .9f}},
-	  {{-.5f, .5f, .5f}, {.9f, .9f, .9f}},
-	  {{-.5f, -.5f, .5f}, {.9f, .9f, .9f}},
-	  {{-.5f, -.5f, -.5f}, {.9f, .9f, .9f}},
-	  {{-.5f, .5f, -.5f}, {.9f, .9f, .9f}},
-	  {{-.5f, .5f, .5f}, {.9f, .9f, .9f}},
-
-	  // right face (yellow)
-	  {{.5f, -.5f, -.5f}, {.8f, .8f, .1f}},
-	  {{.5f, .5f, .5f}, {.8f, .8f, .1f}},
-	  {{.5f, -.5f, .5f}, {.8f, .8f, .1f}},
-	  {{.5f, -.5f, -.5f}, {.8f, .8f, .1f}},
-	  {{.5f, .5f, -.5f}, {.8f, .8f, .1f}},
-	  {{.5f, .5f, .5f}, {.8f, .8f, .1f}},
-
-	  // top face (orange, remember y axis points down)
-	  {{-.5f, -.5f, -.5f}, {.9f, .6f, .1f}},
-	  {{.5f, -.5f, .5f}, {.9f, .6f, .1f}},
-	  {{-.5f, -.5f, .5f}, {.9f, .6f, .1f}},
-	  {{-.5f, -.5f, -.5f}, {.9f, .6f, .1f}},
-	  {{.5f, -.5f, -.5f}, {.9f, .6f, .1f}},
-	  {{.5f, -.5f, .5f}, {.9f, .6f, .1f}},
-
-	  // bottom face (red)
-	  {{-.5f, .5f, -.5f}, {.8f, .1f, .1f}},
-	  {{.5f, .5f, .5f}, {.8f, .1f, .1f}},
-	  {{-.5f, .5f, .5f}, {.8f, .1f, .1f}},
-	  {{-.5f, .5f, -.5f}, {.8f, .1f, .1f}},
-	  {{.5f, .5f, -.5f}, {.8f, .1f, .1f}},
-	  {{.5f, .5f, .5f}, {.8f, .1f, .1f}},
-
-	  // nose face (blue)
-	  {{-.5f, -.5f, 0.5f}, {.1f, .1f, .8f}},
-	  {{.5f, .5f, 0.5f}, {.1f, .1f, .8f}},
-	  {{-.5f, .5f, 0.5f}, {.1f, .1f, .8f}},
-	  {{-.5f, -.5f, 0.5f}, {.1f, .1f, .8f}},
-	  {{.5f, -.5f, 0.5f}, {.1f, .1f, .8f}},
-	  {{.5f, .5f, 0.5f}, {.1f, .1f, .8f}},
-
-	  // tail face (green)
-	  {{-.5f, -.5f, -0.5f}, {.1f, .8f, .1f}},
-	  {{.5f, .5f, -0.5f}, {.1f, .8f, .1f}},
-	  {{-.5f, .5f, -0.5f}, {.1f, .8f, .1f}},
-	  {{-.5f, -.5f, -0.5f}, {.1f, .8f, .1f}},
-	  {{.5f, -.5f, -0.5f}, {.1f, .8f, .1f}},
-	  {{.5f, .5f, -0.5f}, {.1f, .8f, .1f}},
-
-	};
-	for (auto& v : vertices) {
-	v.position += offset;
-	}
-	return std::make_unique<EngineModel>(device, vertices);
-	}
 
 	void loadGameObjects(){
-		std::shared_ptr<EngineModel> engineModel = createCubeModel(engineDevice, {0.0f, 0.0f, 0.0f});
-		for (int x =- 10; x < 10; x++){
-			for (int i= -10; i < 10; i++){
-				auto cube = EngineGameObject::createGameObject();
-				cube.model = engineModel;
-				cube.transform.translation = {0.0f + i, 0 + (i + x) * 0.2f, 0.0f + x};
-				cube.transform.scale = {1.0f, 1.0f, 1.0f};
-				gameObjects.push_back(std::move(cube));
-			}
-		}
+		
+		TerrainMesh tMesh{};
+		std::shared_ptr<Mesh> mesh = tMesh.GenerateTerrain(engineDevice);
+
+		auto terrain = EngineGameObject::createGameObject();
+		terrain.mesh = mesh;
+		gameObjects.push_back(std::move(terrain));
 	}
 
 
