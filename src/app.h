@@ -15,6 +15,7 @@
 #include "camera.h"
 #include "InputSystem.h"
 #include "terrain_mesh.h"
+#include "engine_buffer.h"
 
 #include <memory>
 #include <vector>
@@ -24,6 +25,11 @@
 #include <chrono>
 
 namespace Engine{
+
+struct GlobalUbo {
+	glm::mat4 projectionView{1.f};
+	glm::vec3 lightDirection = glm::normalize(glm::vec3{1.0f, -3.0f, -1.0f});
+};
 
 class App{
 public:
@@ -40,10 +46,20 @@ public:
 
 	void run() {
 
+		EngineBuffer globalUboBuffer{
+			engineDevice,
+			sizeof(GlobalUbo),
+			EngineSwapChain::MAX_FRAMES_IN_FLIGHT,
+			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+			engineDevice.properties.limits.minUniformBufferOffsetAlignment,
+		};
+		globalUboBuffer.map();
+
 	    // internal
 	    float aspect = renderer.getAspectRatio();
 	    auto currentTime = std::chrono::high_resolution_clock::now();
-	    float deltaTime;
+	    float frameTime;
 
 	    // SCRIPTABLE ZONE //////////////////////////////////////////////////
 	    Camera camera{};
@@ -58,10 +74,10 @@ public:
 	    	input.UpdateInputs();
 	  
 
-	    	glm::vec2 moveInput = input.Movement() * 6.0f * deltaTime;
+	    	glm::vec2 moveInput = input.Movement() * 6.0f * frameTime;
 	    	glm::vec2 mouseLook = input.MouseLook() * 0.00045f;
 
-	    	glm::vec3 move = moveInput.x * camera.Right() + glm::vec3(0.0f, input.MovementY() * 6.0f * deltaTime, 0.0f) + moveInput.y * camera.Forward();
+	    	glm::vec3 move = moveInput.x * camera.Right() + glm::vec3(0.0f, input.MovementY() * 6.0f * frameTime, 0.0f) + moveInput.y * camera.Forward();
 	    	glm::vec3 rot{mouseLook.y, -mouseLook.x, 0.0f};
 
 
@@ -87,15 +103,30 @@ public:
 
 	        // calculates time elapsed since last frame
 	        auto newTime = std::chrono::high_resolution_clock::now();
-	        deltaTime = std::chrono::duration<float, std::chrono::seconds::period>(newTime - currentTime).count();
+	        frameTime = std::chrono::duration<float, std::chrono::seconds::period>(newTime - currentTime).count();
 	        currentTime = newTime;
 
 	        // execute scripts before rendering to screen
 	        Update();
 
 	        if (auto commandBuffer = renderer.beginFrame()) {
+	        	int frameIndex = renderer.getFrameIndex();
+	        	FrameInfo frameInfo{
+	        		frameIndex,
+	        		frameTime,
+	        		commandBuffer,
+	        		camera
+	        	};
+
+	        	// update
+	        	GlobalUbo ubo{};
+	        	ubo.projectionView = camera.getProjection() * camera.getView();
+	        	globalUboBuffer.writeToIndex(&ubo, frameIndex);
+	        	globalUboBuffer.flushIndex(frameIndex);
+
+	        	// render
 	            renderer.beginSwapChainRenderPass(commandBuffer);
-	            renderSystem.renderGameObjects(commandBuffer, gameObjects, camera);
+	            renderSystem.renderGameObjects(frameInfo, gameObjects);
 	            renderer.endSwapChainRenderPass(commandBuffer);
 	            renderer.endFrame();
 	        }
@@ -110,21 +141,13 @@ private:
 
 	void loadGameObjects(){
 		
-		TerrainMesh tMesh{};
+		Engine::TerrainSettings settings{};
+		TerrainMesh tMesh{settings};
 		std::shared_ptr<Mesh> mesh = tMesh.GenerateTerrain(engineDevice);
 
 		auto terrain = EngineGameObject::createGameObject();
 		terrain.mesh = mesh;
 		gameObjects.push_back(std::move(terrain));
-	}
-
-
-	void Start(){
-
-	}
-
-	void Update(float deltaTime){
-
 	}
 
 	GameWindow window{width, height, "Minecraft"};
