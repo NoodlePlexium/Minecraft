@@ -14,8 +14,11 @@
 #include "render_system.h"
 #include "camera.h"
 #include "InputSystem.h"
-#include "terrain_mesh.h"
+#include "terrain.h"
 #include "engine_buffer.h"
+#include "engine_descriptor.h"
+#include "player.h"
+#include "engine_physics.h"
 
 #include <memory>
 #include <vector>
@@ -36,7 +39,14 @@ public:
 	static constexpr int width = 800;
 	static constexpr int height = 600;
 
-	App() {loadGameObjects();}
+	App() {
+		globalPool = EngineDescriptorPool::Builder(engineDevice)
+		.setMaxSets(EngineSwapChain::MAX_FRAMES_IN_FLIGHT)
+		.addPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, EngineSwapChain::MAX_FRAMES_IN_FLIGHT)
+		.addPoolSize(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, EngineSwapChain::MAX_FRAMES_IN_FLIGHT)
+		.build();
+		loadGameObjects();
+	}
 
 	~App() {}
 	
@@ -46,58 +56,54 @@ public:
 
 	void run() {
 
-		EngineBuffer globalUboBuffer{
-			engineDevice,
-			sizeof(GlobalUbo),
-			EngineSwapChain::MAX_FRAMES_IN_FLIGHT,
-			VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
-			engineDevice.properties.limits.minUniformBufferOffsetAlignment,
-		};
-		globalUboBuffer.map();
+		std::vector<std::unique_ptr<EngineBuffer>> uboBuffers(EngineSwapChain::MAX_FRAMES_IN_FLIGHT);
+		for (int i =0; i < uboBuffers.size(); i++){
+			uboBuffers[i] = std::make_unique<EngineBuffer>(
+				engineDevice,
+				sizeof(GlobalUbo),
+				1,
+				VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+		
+			uboBuffers[i]->map();
+		}
+
+		auto globalSetLayout = EngineDescriptorSetLayout::Builder(engineDevice)
+		.addBinding(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_ALL_GRAPHICS)
+		.build();
+
+		std::vector<VkDescriptorSet> globalDescriptorSets(EngineSwapChain::MAX_FRAMES_IN_FLIGHT);
+		for (int i = 0; i < globalDescriptorSets.size(); ++i){
+			auto bufferInfo = uboBuffers[i]->descriptorInfo();
+			EngineDescriptorWriter(*globalSetLayout, *globalPool)
+			.writeBuffer(0, &bufferInfo)
+			.build(globalDescriptorSets[i]);
+		}
+
+
+		// WORLD TERRAIN ////////////////////////////////////////////////////
+		loadTerrain();
+
 
 	    // internal
 	    float aspect = renderer.getAspectRatio();
 	    auto currentTime = std::chrono::high_resolution_clock::now();
 	    float frameTime;
 
+
+	    // ENGINE PHYSICS ///////////////////////////////////////////////////   
+		Physics physics{};
+		physics.SetGameObjectPtrs(CreateGameObjectPtrs());
+
 	    // SCRIPTABLE ZONE //////////////////////////////////////////////////
 	    Camera camera{};
 	    camera.setPerspectiveProjection(aspect);
-	    float camPitch;
 	    InputSystem input{window.getGLFWwindow()};
-	    input.setMouseModePlay();
-
-	    auto Update = [&]() {
-
-	    	// Update input system state
-	    	input.UpdateInputs();
-	  
-
-	    	glm::vec2 moveInput = input.Movement() * 6.0f * frameTime;
-	    	glm::vec2 mouseLook = input.MouseLook() * 0.00045f;
-
-	    	glm::vec3 move = moveInput.x * camera.Right() + glm::vec3(0.0f, input.MovementY() * 6.0f * frameTime, 0.0f) + moveInput.y * camera.Forward();
-	    	glm::vec3 rot{mouseLook.y, -mouseLook.x, 0.0f};
-
-
-	    	camera.position += move;
-
-	    	std::cout << move.x << std::endl;
-	    	camera.rotation += rot;
-	    	camera.rotation.x = glm::clamp(camera.rotation.x, -glm::pi<float>() * 0.5f, glm::pi<float>() * 0.5f); // clamp
-
-
-
-			// set camera view
-			camera.setView();
-			aspect = renderer.getAspectRatio();
-			camera.setPerspectiveProjection(aspect);
-	    };
+	    Player player(camera, input, aspect);
 	    /////////////////////////////////////////////////////////////////////
 
 	    // INTERNAL LOOP RUNS ONCE PER FRAME ///////////////////////////////
-	    RenderSystem renderSystem{engineDevice, renderer.getSwapChainRenderPass()};
+	    RenderSystem renderSystem{engineDevice, renderer.getSwapChainRenderPass(), globalSetLayout->getDescriptorSetLayout()};
 	    while (!window.shouldClose()) {
 	        glfwPollEvents();
 
@@ -107,7 +113,13 @@ public:
 	        currentTime = newTime;
 
 	        // execute scripts before rendering to screen
-	        Update();
+	        player.Update(frameTime, renderer.getAspectRatio());
+
+	        // Update terrain
+	       	glm::vec3 playerPos = player.getPlayerPosition();
+			UpdateTerrain(playerPos.x, playerPos.z);
+
+
 
 	        if (auto commandBuffer = renderer.beginFrame()) {
 	        	int frameIndex = renderer.getFrameIndex();
@@ -115,24 +127,39 @@ public:
 	        		frameIndex,
 	        		frameTime,
 	        		commandBuffer,
-	        		camera
+	        		camera,
+	        		globalDescriptorSets[frameIndex]
 	        	};
 
 	        	// update
 	        	GlobalUbo ubo{};
-	        	ubo.projectionView = camera.getProjection() * camera.getView();
-	        	globalUboBuffer.writeToIndex(&ubo, frameIndex);
-	        	globalUboBuffer.flushIndex(frameIndex);
+	        	ubo.projectionView = player.camera.getProjection() * player.camera.getView();
+	        	uboBuffers[frameIndex]->writeToBuffer(&ubo);
+	        	uboBuffers[frameIndex]->flush();
 
 	        	// render
 	            renderer.beginSwapChainRenderPass(commandBuffer);
-	            renderSystem.renderGameObjects(frameInfo, gameObjects);
+	            renderSystem.renderGameObjects(frameInfo, gameObjects, terrain);
 	            renderer.endSwapChainRenderPass(commandBuffer);
 	            renderer.endFrame();
 	        }
 	    }
 	    vkDeviceWaitIdle(engineDevice.device());
 	}
+
+	// Return a vector of pointers belonging to App
+	std::vector<EngineGameObject*> CreateGameObjectPtrs(){
+		std::vector<EngineGameObject*> gameObjectPtrs;
+	    gameObjectPtrs.reserve(gameObjects.size());  // Reserve memory to avoid reallocations
+
+	    for (auto& gameObject : gameObjects) {
+	        gameObjectPtrs.push_back(&gameObject);
+	    }
+	    return gameObjectPtrs;
+	}
+
+
+
 
 
 
@@ -141,19 +168,29 @@ private:
 
 	void loadGameObjects(){
 		
-		Engine::TerrainSettings settings{};
-		TerrainMesh tMesh{settings};
-		std::shared_ptr<Mesh> mesh = tMesh.GenerateTerrain(engineDevice);
-
-		auto terrain = EngineGameObject::createGameObject();
-		terrain.mesh = mesh;
-		gameObjects.push_back(std::move(terrain));
 	}
+
+
+
+	void loadTerrain() {
+		Terrain::TerrainSettings terrainSettings;
+		terrain = Terrain(terrainSettings);
+	}
+
+	void UpdateTerrain(float playerX, float playerZ) {
+		terrain.UpdateChunks(5, playerX, playerZ, engineDevice);
+	}
+
 
 	GameWindow window{width, height, "Minecraft"};
     EngineDevice engineDevice{window};
     Renderer renderer{window, engineDevice};
+
+    std::unique_ptr<EngineDescriptorPool> globalPool{};
     std::vector<EngineGameObject> gameObjects;
+
+    // TERRAIN
+	Terrain terrain;
 };
 
 
