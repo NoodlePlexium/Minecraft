@@ -1,5 +1,5 @@
-#ifndef TERRAIN_MESH_H
-#define TERRAIN_MESH_H
+#ifndef TERRAIN_H
+#define TERRAIN_H
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -7,24 +7,41 @@
 #include "engine_mesh.h"
 #include "engine_device.h"
 #include "FastNoiseLite.h"
+#include "Vector.h"
 #include <vector>
 #include <cstdlib>
+#include <cmath>
+#include <unordered_map>
+#include <functional>
+
 
 namespace Engine{
-class TerrainMesh{
 
+
+class Terrain{
 public:
-
-	TerrainMesh() {Init();}
-
 
 	struct Point{
 		float x = 0;
 		float y = 0;
 		float z = 0;
 		float activation = 0.0f;
-	};
 
+		bool operator==(const Point &other) const
+		{ 
+			return (x == other.x && y == other.y && z == other.z);
+		}
+	};
+	struct PointHasher {
+        std::size_t operator()(const Point& p) const {
+            using std::size_t;
+            using std::hash;
+
+            return ((hash<float>()(p.x)
+                     ^ (hash<float>()(p.y) << 1)) >> 1)
+                     ^ (hash<float>()(p.z) << 1);
+        }
+    };
 	struct Cube{
 		int x;
 		int y;
@@ -70,71 +87,247 @@ public:
 			corners[7].x = x - 0.5f;
 			corners[7].y = y + 0.5f;
 			corners[7].z = z - 0.5f;
+		}
 
-
-			// calc activations
-			for (int i = 0; i < corners.size(); i++) {
-			    float posX = corners[i].x;
-			    float posY = corners[i].y;
-			    float posZ = corners[i].z;
-			    corners[i].activation = TerrainMesh::GetNoise3D(posX, posY, posZ) * 10;
-			}
-
+		int getCubeIndex(float isolevel){
+			int cubeIndex = 0;
+			for (int i=0; i<8; ++i){	
+			if (corners[i].activation > isolevel) cubeIndex |= (1 << i);}
+			return cubeIndex;
 		}
 	};
+	struct TerrainSettings{
+		float isoLevel = 0.34f;
 
-	std::shared_ptr<Mesh> GenerateTerrain(EngineDevice& device){
+		// World Settings
+		int worldHeight = 5;	
+		int surfaceHeight = 1;
+		int chunkSize = 20;
+
+
+		// Noise Settings
+		int seed = 354884;
+		int octaves = 4;
+		float prominance = 0.5f;
+		float caveNoiseScale = 0.2f;
+		float surfaceNoiseScale = 2.5f;
+		float surfaceNoiseStrength = 25.0f;
+
+		// Material Settings
+	    float snowMinHeightPercent = 0.9f;
+	    float snowMaxAngle = 55.0f;
+	    Vector3 snowColour;
+
+	    float grassMaxAngle = 45.0f;
+	    Vector3 grassColour;
+
+	    Vector3 stoneColour;
+
+	    TerrainSettings() {
+	        snowColour = Vector3(1.0f, 1.0f, 1.0f);
+	        grassColour = Vector3(0.45f, 0.62f, 0.2f);
+	        stoneColour = Vector3(0.3f, 0.3f, 0.3f);
+	    }
+	};
+	struct Chunk{
+		std::vector<Cube> cubes;
+		int x;
+		int z;
+	};
+
+
+
+	Terrain(TerrainSettings _settings = TerrainSettings{}) : settings(_settings) {Init();}
+
+
+	std::vector<Chunk> chunks;
+	std::vector<EngineGameObject> chunkObjects;
+
+void UpdateChunks(int renderDistance, float playerX, float playerZ, EngineDevice& device) {
+
+    // Chunk coordinates that bound the player
+    playerX = static_cast<int>(std::round(playerX));
+    playerZ = static_cast<int>(std::round(playerZ));
+
+    int CenterChunkX = static_cast<int>(std::floor(playerX / settings.chunkSize) * settings.chunkSize);
+    int CenterChunkZ = static_cast<int>(std::floor(playerZ / settings.chunkSize) * settings.chunkSize);
+
+    int offset = (renderDistance - 1) * settings.chunkSize / 2;
+
+    for (int x = 0; x < renderDistance; x++) {
+        for (int z = 0; z < renderDistance; z++) {
+            int worldX = x * settings.chunkSize - offset + CenterChunkX;
+            int worldZ = z * settings.chunkSize - offset + CenterChunkZ;
+
+            bool chunkPresent = false;
+
+            // Check if there is a chunk at the position
+            for (int i = 0; i < chunks.size(); i++) {
+
+            	// 1 - remove chunks that are out of render distance
+            	int chunkDist = std::abs(chunks[i].x - CenterChunkX) + std::abs(chunks[i].z - CenterChunkZ);
+            	if (chunkDist > renderDistance * settings.chunkSize){
+            		chunks.erase(chunks.begin() + i);
+            		chunkObjects.erase(chunkObjects.begin() + i);
+            		break;
+            	} 
+
+            	// 2 - check if chunk exists at current iteration position
+                if (chunks[i].x == worldX && chunks[i].z == worldZ) {
+                    chunkPresent = true;
+                    break;
+                }
+            }
+
+            // No chunk present? Create a new one
+            if (!chunkPresent){
+            	Chunk newChunk = GenerateChunk(worldX, worldZ);
+            	chunks.push_back(newChunk);
+            	CreateChunkObject(newChunk, device);
+            }
+        }
+    }
+}
+
+
+
+
+
+	void CreateChunkObject(Chunk& chunk, EngineDevice& device) {
+	    EngineGameObject terrainObject = EngineGameObject::createGameObject();
+	    terrainObject.mesh = MeshFromChunk(chunk, device);
+	    chunkObjects.push_back(std::move(terrainObject));
+	}
+
+
+
+private:
+	void Init(){
+		InitNoiseGenerator();
+	}
+
+	// Member variables
+	TerrainSettings settings;
+	FastNoiseLite noiseGenerator3D;
+	FastNoiseLite noiseGenerator2D;
+
+// TERRAIN GENERATION //////////////////////////////////////////////////////////////
+	Chunk GenerateChunk(int posX, int posZ) {
+	    Chunk chunk;
+	    chunk.x = posX;
+	    chunk.z = posZ;
+
+		int offset = (settings.chunkSize-1)/2;
+
+	    for (int x = 0; x < settings.chunkSize; ++x) {
+	        for (int y = 0; y < settings.worldHeight; ++y) {
+	            for (int z = 0; z < settings.chunkSize; ++z) {
+	                Cube cube{};
+	                cube.x = x - offset + chunk.x;
+	                cube.y = y;
+	                cube.z = z - offset + chunk.z;
+	                cube.InitCorners();
+
+	                // calc corner activations
+	                for (int i = 0; i < cube.corners.size(); ++i) {
+	                    // Surface Noise
+	                    float height = cube.corners[i].y;
+	                    float surfaceHeight = settings.surfaceHeight + GetNoise2D(cube.corners[i].x, cube.corners[i].z) * settings.surfaceNoiseStrength;
+	                    bool aboveSurface = height > surfaceHeight;
+	                    float distAboveSurface = height - surfaceHeight;
+
+	                    // Cave holes in surface
+	                    float caveValue = GetNoise3D(cube.corners[i].x, cube.corners[i].y, cube.corners[i].z) + (height / surfaceHeight) * 0.1f;
+	                    bool isSurfaceHole = caveValue < settings.isoLevel && distAboveSurface < 1.0f && aboveSurface;
+
+	                    if (aboveSurface && !isSurfaceHole) {
+	                        cube.corners[i].activation = 1 - distAboveSurface;
+	                    } else {
+	                        cube.corners[i].activation = caveValue;
+	                    }
+	                }
+
+	                // Append cube to chunk
+	                chunk.cubes.push_back(cube);
+	            }
+	        }
+	    }
+	    return chunk;
+	}
+
+	std::shared_ptr<Mesh> MeshFromChunk(const Chunk& chunk, EngineDevice& device){
+
 		Mesh::Builder meshBuilder{};
-		int isolevel = 5;
 
-		for (int x=0; x<width; x++){
-			for (int y=0; y<height; y++){
-				for (int z=0; z<depth; z++){
+		// Hashmap to check for duplicate vertices
+		std::unordered_map<Point, uint32_t, PointHasher> vertexMap;
 
-					Cube cube{};
-					cube.x = x;
-					cube.y = y;
-					cube.z = z;
-					cube.InitCorners();
+		// For each cube in chunk
+		for(int j=0; j<chunk.cubes.size(); ++j){
 
+			Cube cube = chunk.cubes[j];
+			int cubeIndex = cube.getCubeIndex(settings.isoLevel);
+			std::vector<Point> p = cube.corners;
 
-					// Other method
-					int cubeIndex = getCubeIndex(cube, isolevel);
+			// Append vertex buffer vertices
+			const int* TriTableRow = TriTable[cubeIndex];
+			int i = 0;
+			while(TriTableRow[i] != -1){
+				int a0 = cornerIndexAFromEdge[TriTable[cubeIndex][i]];
+				int b0 = cornerIndexBFromEdge[TriTable[cubeIndex][i]];
+				int a1 = cornerIndexAFromEdge[TriTable[cubeIndex][i+1]];
+				int b1 = cornerIndexBFromEdge[TriTable[cubeIndex][i+1]];
+				int a2 = cornerIndexAFromEdge[TriTable[cubeIndex][i+2]];
+				int b2 = cornerIndexBFromEdge[TriTable[cubeIndex][i+2]];
 
-					std::vector<Point> p = cube.corners;
+				Point p1 = VertexInterp(settings.isoLevel,p[a0], p[b0]);
+				Point p2 = VertexInterp(settings.isoLevel,p[a1], p[b1]);
+				Point p3 = VertexInterp(settings.isoLevel,p[a2], p[b2]);
 
+				// Calculate the normal
+				Vector3 normal = CalculateNormal(p1, p2, p3);
 
-					// Append vertex buffer vertices
-					const int* TriTableRow = TriTable[cubeIndex];
-					int i = 0;
-					while(TriTableRow[i] != -1){
-						int a0 = cornerIndexAFromEdge[TriTable[cubeIndex][i]];
-				        int b0 = cornerIndexBFromEdge[TriTable[cubeIndex][i]];
-
-				        int a1 = cornerIndexAFromEdge[TriTable[cubeIndex][i+1]];
-				        int b1 = cornerIndexBFromEdge[TriTable[cubeIndex][i+1]];
-
-				        int a2 = cornerIndexAFromEdge[TriTable[cubeIndex][i+2]];
-				        int b2 = cornerIndexBFromEdge[TriTable[cubeIndex][i+2]];
-
-				        Point p1 = VertexInterp(isolevel,p[a0], p[b0]);
-				        Point p2 = VertexInterp(isolevel,p[a1], p[b1]);
-				        Point p3 = VertexInterp(isolevel,p[a2], p[b2]);
-
-						meshBuilder.vertices.push_back({{p1.x, p1.y, p1.z}, {.34f, .24f, .19f}});
-						meshBuilder.vertices.push_back({{p2.x, p2.y, p2.z}, {.42f, .15f, .24f}});
-						meshBuilder.vertices.push_back({{p3.x, p3.y, p3.z}, {.29f, .20f, .18f}});
-						i+=3;
-					}
+				// Check for vertex duplicates. Vertex does not exist, add it to the hashmap and vector
+				auto it1 = vertexMap.find(p1);
+				if (it1 != vertexMap.end()) {
+				    meshBuilder.indices.push_back(it1->second);
+				} else {
+				   vertexMap[p1] = meshBuilder.vertices.size();
+				   meshBuilder.indices.push_back(meshBuilder.vertices.size());
+				   meshBuilder.vertices.push_back(ConstructVertex(p1, normal));
 				}
+
+				auto it2 = vertexMap.find(p2);
+				if (it2 != vertexMap.end()) {
+				    meshBuilder.indices.push_back(it2->second);
+				} else {
+				   vertexMap[p2] = meshBuilder.vertices.size();
+				   meshBuilder.indices.push_back(meshBuilder.vertices.size());
+				   meshBuilder.vertices.push_back(ConstructVertex(p2, normal));
+				}
+
+				auto it3 = vertexMap.find(p3);
+				if (it3 != vertexMap.end()) {
+				    meshBuilder.indices.push_back(it3->second);
+				} else {
+				   vertexMap[p3] = meshBuilder.vertices.size();
+				   meshBuilder.indices.push_back(meshBuilder.vertices.size());
+				   meshBuilder.vertices.push_back(ConstructVertex(p3, normal));
+				}
+				i+=3;
 			}
 		}
-
 		// Return mesh
 		return std::make_unique<Mesh>(device, meshBuilder);
 	}
 
-	Point VertexInterp(int isolevel, const Point& p1, const Point& p2) {
+	Mesh::Vertex ConstructVertex(Point p, Vector3 normal){
+		Vector2 uv = CalculateUV(p);
+		Vector3 c = CalculateColour(p.y, normal);
+		return {{p.x, p.y, p.z}, {c.x, c.y, c.z}, {normal.x, normal.y, normal.z}, {uv.x, uv.y}};
+	}
+
+	Point VertexInterp(float isolevel, const Point& p1, const Point& p2) {
 		float t = (isolevel - p1.activation) / (p2.activation - p1.activation);
 		Point p;
 		p.x = p1.x + t * (p2.x - p1.x); // Smooth
@@ -144,61 +337,88 @@ public:
 		// p.y = (p1.y + p2.y)/2.0f;
 		// p.z = (p1.z + p2.z)/2.0f;
 		return p;
-		}
-
-
-
-	int getCubeIndex(Cube cube, int isolevel){
-		int cubeIndex = 0;
-		if (cube.corners[0].activation < isolevel) cubeIndex |= 1;
-		if (cube.corners[1].activation < isolevel) cubeIndex |= 2;
-		if (cube.corners[2].activation < isolevel) cubeIndex |= 4;
-		if (cube.corners[3].activation < isolevel) cubeIndex |= 8;
-		if (cube.corners[4].activation < isolevel) cubeIndex |= 16;
-		if (cube.corners[5].activation < isolevel) cubeIndex |= 32;
-		if (cube.corners[6].activation < isolevel) cubeIndex |= 64;
-		if (cube.corners[7].activation < isolevel) cubeIndex |= 128;
-		return cubeIndex;
 	}
 
+	Vector3 CalculateNormal(const Point& p1, const Point& p2, const Point& p3){
+		Vector3 v1(p2.x - p1.x, p2.y - p1.y, p2.z - p1.z);
+	   Vector3 v2(p3.x - p1.x, p3.y - p1.y, p3.z - p1.z);
 
+	   // Calculate the cross product
+	   Vector3 normal = v1.crossProduct(v2);
 
-private:
-	void Init(){
-		height = 50;
-		width = 50;
-		depth = 50;
-		InitNoiseGenerator();
+	   // return the normalized vector
+	   return normal.normalized();
 	}
 
-	// Member variables
-	int height;
-	int width;
-	int depth;
-	static FastNoiseLite noiseGenerator;
+	Vector2 CalculateUV(const Point& point) {
+    	float u = point.x; // calculate the u coordinate based on the point's position
+    	float v = point.z; // calculate the v coordinate based on the point's position
+    	return Vector2(u, v);
+	}
 
-	// Generate Noise Method
-	static float GetNoise3D(float x, float y, float z){
-		float scale = 1.0f;
+	Vector3 CalculateColour(float y, Vector3 normal){
 
+    	// Calculate the steepness of the vertice
+    	float angle = std::acos(normal.y * -1.0f) * (180.0 / 3.141592654f);
+
+    	bool isSnowHeight = (y/settings.worldHeight) > settings.snowMinHeightPercent;
+
+
+    	// Snow 
+    	if (isSnowHeight && angle < settings.snowMaxAngle)
+    	{
+    		return settings.snowColour;
+    	}
+    	else if (isSnowHeight && angle > settings.snowMaxAngle || !isSnowHeight && angle > settings.grassMaxAngle)
+    	{
+    		return settings.stoneColour;
+    	}
+    	else
+    	{
+			return settings.grassColour;
+    	}
+	}
+// TERRAIN GENERATION //////////////////////////////////////////////////////////////
+
+// NOISE GENERATION ////////////////////////////////////////////////////////////////
+	float GetNoise3D(float x, float y, float z){
 		float totalNoise = 0.0f;
     	float frequency = 1.0f;
     	float amplitude = 1.0f;
 
-		for (int i = 0; i < 6; i++) {
-        	totalNoise += noiseGenerator.GetNoise(x * frequency / scale, y * frequency / scale, z * frequency / scale) * amplitude;
+		for (int i = 0; i < settings.octaves; i++) {
+        	totalNoise += noiseGenerator3D.GetNoise(x*frequency/settings.caveNoiseScale, y*frequency/settings.caveNoiseScale, z*frequency/settings.caveNoiseScale) * amplitude;
         	frequency *= 2.0f;  // Increase the frequency for each octave
-        	amplitude *= 0.8f;  // Decrease the amplitude for each octave
+        	amplitude *= settings.prominance;  // Decrease the amplitude for each octave
     	}
 		return (totalNoise + 1)/2.0f;
 	}
 
-	static void InitNoiseGenerator(){
-        noiseGenerator.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
+	float GetNoise2D(float x, float y) {
+		float totalNoise = 0.0f;
+		float frequency = 1.0f;
+		float amplitude = 1.0f;
+
+		for (int i = 0; i < settings.octaves; i++) {
+	    	totalNoise += noiseGenerator3D.GetNoise(x*frequency/settings.surfaceNoiseScale, y*frequency/settings.surfaceNoiseScale) * amplitude;
+	    	frequency *= 2.0f;  // Increase the frequency for each octave
+	    	amplitude *= settings.prominance;  // Decrease the amplitude for each octave
+		}
+		return (totalNoise + 1)/2.0f;
 	}
 
-const int cornerIndexAFromEdge[12] = {0,1,2,3,4,5,6,7,0,1,2,3};
-const int cornerIndexBFromEdge[12] = {1,2,3,0,5,6,7,4,4,5,6,7};
+	void InitNoiseGenerator(){
+      noiseGenerator3D.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
+      noiseGenerator2D.SetNoiseType(FastNoiseLite::NoiseType_Perlin);
+      noiseGenerator3D.SetSeed(settings.seed);
+      noiseGenerator2D.SetSeed(settings.seed);
+	}
+// NOISE GENERATION ////////////////////////////////////////////////////////////////
+
+
+// LOOKUP TABLES //////////////////////////////////////////////
+int cornerIndexAFromEdge[12] = {0,1,2,3,4,5,6,7,0,1,2,3};
+int cornerIndexBFromEdge[12] = {1,2,3,0,5,6,7,4,4,5,6,7};
 
 int TriTable[256][16]={
 {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 },
@@ -458,10 +678,5 @@ int TriTable[256][16]={
 { 0, 3, 8, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 },
 {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 }};
 };
-
-// Definition of the static member variable
-FastNoiseLite TerrainMesh::noiseGenerator;
-
 } // namespace
-
 #endif
