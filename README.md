@@ -1,6 +1,6 @@
 # Terrain Engine
 
-A 3g graphics terrain engine based on marching cubes. This project uses Vulkan for 3D graphics and GLFW for windowing.
+A 3D graphics terrain engine based on marching cubes. This project uses Vulkan for 3D graphics and GLFW for windowing.
 This project was started using the vulkan-cpp-starter repo: https://github.com/CapsCollective/vulkan-cpp-starter
 
 ### Licence
