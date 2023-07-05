@@ -17,3 +17,18 @@ A combination of 2D and 3D noise is used, 2D noise as a heightmap for the surfac
 
 ### Cave Generation 
 ![alt text](https://github.com/NoodlePlexium/Minecraft/blob/main/Screenshot2.png)
+
+
+### Todo's
+Need to integrate the marching cubes compute shader into the source code to massively improve the mesh generation and increase the framerate.
+Complete the ray cast algorithm and spacial partitioning system.
+Terrain terraforming - add/remove density values from the marching cubes, the remesh the chunk.
+Implement capsule-triangle collision, allowing the player to walk on the surface.
+Implement textures into the rendering process, and redefine the material rules for the terrain.
+Create a billboard class - used for rendering grass and worldspace UI elements.
+Add Point lights.
+
+### Experimentation and research
+THis project will be the grounds of personal research into computer rendering, particularly concerning Realtime Global Illumination. 
+I intend to create marching cubes terrain specific Global Illumination using radiosity. 
+This project marks the second step in my lighting journey. My first experiment with lighting can be found here: https://github.com/NoodlePlexium/Raytracer 
