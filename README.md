@@ -11,6 +11,7 @@ This project is licenced under an unmodified zlib/libpng licence, which is an OS
 This demo uses a chunk based terrain system. Each chunk is treated as a separate mesh. 
 Chunks are loaded and removed at runtime, one chunk per frame max, spreading the computational load across multiple frames.
 The terrain uses a typical layered perlin noise and materials are set according to rules.
+A combination of 2D and 3D noise is used, 2D noise as a heightmap for the surface and 3D noise for caves and eventually overhangs.
 
 ![alt text](https://github.com/NoodlePlexium/Minecraft/blob/main/Screenshot1.png)
 
