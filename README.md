@@ -29,6 +29,6 @@ Create a billboard class - used for rendering grass and worldspace UI elements.
 Add Point lights.
 
 ### Experimentation and research
-THis project will be the grounds of personal research into computer rendering, particularly concerning Realtime Global Illumination. 
+This project will be the grounds of personal research into computer rendering, particularly concerning Realtime Global Illumination. 
 I intend to create marching cubes terrain specific Global Illumination using radiosity. 
 This project marks the second step in my lighting journey. My first experiment with lighting can be found here: https://github.com/NoodlePlexium/Raytracer 
