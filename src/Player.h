@@ -24,9 +24,12 @@ public:
     	input.UpdateInputs();
 
 
-		glm::vec2 moveInput = input.Movement() * 10.0f * frameTime;
+		float speed = 20.0f;
+
+
+		glm::vec2 moveInput = input.Movement() * speed * frameTime;
     	glm::vec2 mouseLook = input.MouseLook() * 0.00045f;
-    	glm::vec3 move = moveInput.x * camera.Right() + glm::vec3(0.0f, input.MovementY() * 10.0f * frameTime, 0.0f) + moveInput.y * camera.Forward();
+    	glm::vec3 move = moveInput.x * camera.Right() + glm::vec3(0.0f, input.MovementY() * speed * frameTime, 0.0f) + moveInput.y * camera.Forward();
     	glm::vec3 rot{mouseLook.y, -mouseLook.x, 0.0f};
 
 
@@ -40,8 +43,11 @@ public:
 
 		//RayHit hit = Physics::RayCast(Vector3(camera.position), Vector3(camera.Forward()));
 
-		if (input.GetKeyDown(InputSystem::KeyCode::Escape) && input.GetMouseMode() == MouseMode::Play) input.SetMouseMode(MouseMode::Normal);
-        else input.SetMouseMode(MouseMode::Play);
+		if (input.GetKeyDown(InputSystem::KeyCode::Escape))
+		{
+			if (input.GetMouseMode() == MouseMode::Play) input.SetMouseMode(MouseMode::Normal);
+			else input.SetMouseMode(MouseMode::Play);
+		} 
 	}
 
 
@@ -66,3 +72,4 @@ private:
 }
 
 #endif
+
