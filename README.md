@@ -1,6 +1,6 @@
-# Minecraft Clone
+# Terrain Engine
 
-A minecraft clone built with c++ and Vulkan
+A 3g graphics terrain engine based on marching cubes. This project uses Vulkan for 3D graphics and GLFW for windowing.
 This project was started using the vulkan-cpp-starter repo: https://github.com/CapsCollective/vulkan-cpp-starter
 
 ### Licence
@@ -9,3 +9,6 @@ This project is licenced under an unmodified zlib/libpng licence, which is an OS
 
 ### Triangle 
 ![alt text](https://github.com/NoodlePlexium/Minecraft/blob/main/Triangle.png)
+
+### Early Terrain 
+![alt text](https://github.com/NoodlePlexium/Minecraft/blob/main/Screenshot1.png)
