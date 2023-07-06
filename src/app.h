@@ -12,9 +12,10 @@
 #include "engine_mesh.h"
 #include "engine_game_object.h"
 #include "render_system.h"
+#include "terrain_render_system.h"
 #include "camera.h"
 #include "InputSystem.h"
-#include "terrain.h"
+#include "../terrain/terrain.h"
 #include "engine_buffer.h"
 #include "engine_descriptor.h"
 #include "player.h"
@@ -40,6 +41,7 @@ public:
 	static constexpr int height = 600;
 
 	App() {
+		// Descriptor set pool
 		globalPool = EngineDescriptorPool::Builder(engineDevice)
 		.setMaxSets(EngineSwapChain::MAX_FRAMES_IN_FLIGHT)
 		.addPoolSize(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, EngineSwapChain::MAX_FRAMES_IN_FLIGHT)
@@ -56,6 +58,7 @@ public:
 
 	void run() {
 
+		// UNIFORM BUFFER OBJECT
 		std::vector<std::unique_ptr<EngineBuffer>> uboBuffers(EngineSwapChain::MAX_FRAMES_IN_FLIGHT);
 		for (int i =0; i < uboBuffers.size(); i++){
 			uboBuffers[i] = std::make_unique<EngineBuffer>(
@@ -102,8 +105,11 @@ public:
 	    Player player(camera, input, aspect);
 	    /////////////////////////////////////////////////////////////////////
 
-	    // INTERNAL LOOP RUNS ONCE PER FRAME ///////////////////////////////
-	    RenderSystem renderSystem{engineDevice, renderer.getSwapChainRenderPass(), globalSetLayout->getDescriptorSetLayout()};
+	    // RENDER SYSTEMS SETUP ///////////////////////////////
+	    RenderSystem renderSystem{engineDevice, renderer.getSwapChainRenderPass(), globalSetLayout->getDescriptorSetLayout()}; // Game Object Render System
+		TerrainRenderSystem terrainRenderSystem{engineDevice, renderer.getSwapChainRenderPass(), globalSetLayout->getDescriptorSetLayout()}; // Terrain Render System
+
+		// INTERNAL LOOP RUNS ONCE PER FRAME ///////////////////////////////
 	    while (!window.shouldClose()) {
 	        glfwPollEvents();
 
@@ -139,7 +145,8 @@ public:
 
 	        	// render
 	            renderer.beginSwapChainRenderPass(commandBuffer);
-	            renderSystem.renderGameObjects(frameInfo, gameObjects, terrain);
+	            renderSystem.renderGameObjects(frameInfo, gameObjects);
+				terrainRenderSystem.renderTerrain(frameInfo, terrain);
 	            renderer.endSwapChainRenderPass(commandBuffer);
 	            renderer.endFrame();
 	        }
@@ -170,19 +177,17 @@ private:
 		
 	}
 
-
-
 	void loadTerrain() {
 		Terrain::TerrainSettings terrainSettings;
 		terrain = Terrain(terrainSettings);
 	}
 
 	void UpdateTerrain(float playerX, float playerZ) {
-		terrain.UpdateChunks(5, playerX, playerZ, engineDevice);
+		terrain.UpdateChunks(20, playerX, playerZ, engineDevice);
 	}
 
 
-	GameWindow window{width, height, "Minecraft"};
+	GameWindow window{width, height, "World"};
     EngineDevice engineDevice{window};
     Renderer renderer{window, engineDevice};
 
@@ -192,10 +197,5 @@ private:
     // TERRAIN
 	Terrain terrain;
 };
-
-
-
 } // namespace
-
-
 #endif
