@@ -10,7 +10,7 @@
 #include <cassert>
 
 #include "engine_device.h"
-#include "engine_model.h"
+#include "engine_mesh.h"
 
 namespace Engine{
 
@@ -71,9 +71,10 @@ public:
 		configInfo.rasterizationInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
 		configInfo.rasterizationInfo.depthClampEnable = VK_FALSE;
 		configInfo.rasterizationInfo.rasterizerDiscardEnable = VK_FALSE;
-		configInfo.rasterizationInfo.polygonMode = VK_POLYGON_MODE_FILL;
-		configInfo.rasterizationInfo.lineWidth = 1.0f;
-		configInfo.rasterizationInfo.cullMode = VK_CULL_MODE_NONE;
+		// configInfo.rasterizationInfo.polygonMode = VK_POLYGON_MODE_FILL; // Render Faces
+		configInfo.rasterizationInfo.polygonMode = VK_POLYGON_MODE_LINE; // Render Wireframe
+		configInfo.rasterizationInfo.lineWidth = 3.0f;
+		configInfo.rasterizationInfo.cullMode = VK_CULL_MODE_BACK_BIT;
 		configInfo.rasterizationInfo.frontFace = VK_FRONT_FACE_CLOCKWISE;
 		configInfo.rasterizationInfo.depthBiasEnable = VK_FALSE;
 		configInfo.rasterizationInfo.depthBiasConstantFactor = 0.0f;  // Optional
@@ -179,8 +180,8 @@ private:
 		shaderStages[1].pSpecializationInfo = nullptr;
 
 
-		auto bindingDescriptions = EngineModel::Vertex::getBindingDescriptions();
-		auto attributeDescriptions = EngineModel::Vertex::getAttributeDescriptions();
+		auto bindingDescriptions = Mesh::Vertex::getBindingDescriptions();
+		auto attributeDescriptions = Mesh::Vertex::getAttributeDescriptions();
 		VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
 		vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 		vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
@@ -190,6 +191,8 @@ private:
 
 		VkGraphicsPipelineCreateInfo pipelineInfo{};
 		pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+
+		// EXPERIMENTAL!!! CHANGED FROM 2 TO 3!!!
 		pipelineInfo.stageCount = 2;
 		pipelineInfo.pStages = shaderStages;
 		pipelineInfo.pVertexInputState = &vertexInputInfo;
