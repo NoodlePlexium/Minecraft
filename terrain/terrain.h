@@ -8,19 +8,11 @@
 #include "../src/engine_device.h"
 #include "../src/engine_buffer.h"
 #include "../src/Vector.h"
-#include "tables.h"
-#include "FastNoiseLite.h"
 #include "../src/compute_pipeline.h"
+#include "FastNoiseLite.h"
 #include <vector>
-#include <cstdlib>
-#include <cmath>
-#include <unordered_map>
-#include <functional>
-
 
 namespace Engine{
-
-
 class Terrain{
 public:
 
@@ -56,85 +48,18 @@ public:
 	    }
 	};
 
-	struct Corner { 
-		float x = 0;
-		float y = 0;
-		float z = 0;
-		float activation = 0.0f;
-
-		bool operator==(const Corner &other) const
-		{ 
-			return (x == other.x && y == other.y && z == other.z);
-		}
+	
+	// Pass to GPU
+	struct CubeGPU {
+		glm::vec3 position;
+		std::vector<float> Corner3DNoise;
+		std::vector<float> Corner2DNoise;
 	};
-	struct CornerHasher {
-        std::size_t operator()(const Corner& p) const {
-            using std::size_t;
-            using std::hash;
 
-            return ((hash<float>()(p.x)
-                     ^ (hash<float>()(p.y) << 1)) >> 1)
-                     ^ (hash<float>()(p.z) << 1);
-        }
-    };
-	struct Cube {
+	struct Chunk {
 		int x;
 		int y;
 		int z;
-		std::vector<Corner> corners{};
-
-		// Initialize corner positions
-		void InitCorners(){
-
-			for (int i=0; i<8; ++i){
-				Corner newCorner{};
-				corners.push_back(newCorner);
-			}
-
-			corners[0].x = x - 0.5f;
-			corners[0].y = y - 0.5f;
-			corners[0].z = z + 0.5f;
-			corners[1].x = x + 0.5f;
-			corners[1].y = y - 0.5f;
-			corners[1].z = z + 0.5f;
-			corners[2].x = x + 0.5f;
-			corners[2].y = y - 0.5f;
-			corners[2].z = z - 0.5f;
-			corners[3].x = x - 0.5f;
-			corners[3].y = y - 0.5f;
-			corners[3].z = z - 0.5f;
-			corners[4].x = x - 0.5f;
-			corners[4].y = y + 0.5f;
-			corners[4].z = z + 0.5f;
-			corners[5].x = x + 0.5f;
-			corners[5].y = y + 0.5f;
-			corners[5].z = z + 0.5f;
-			corners[6].x = x + 0.5f;
-			corners[6].y = y + 0.5f;
-			corners[6].z = z - 0.5f;
-			corners[7].x = x - 0.5f;
-			corners[7].y = y + 0.5f;
-			corners[7].z = z - 0.5f;
-		}
-
-		int getCubeIndex(float isolevel){
-			int cubeIndex = 0;
-			for (int i=0; i<8; ++i){	
-			if (corners[i].activation > isolevel) cubeIndex |= (1 << i);}
-			return cubeIndex;
-		}
-	};
-	struct Chunk {
-		std::vector<Cube> cubes;
-		int x;
-		int z;
-	};
-
-	// Pass to GPU
-	struct CubeGPU {
-		std::vector<glm::vec3> cornerPositions;
-		std::vector<float> Corner3DNoise;
-		std::vector<float> Corner2DNoise;
 	};
 
 
@@ -203,11 +128,7 @@ public:
 	}
 
 private:
-	void Init() {
-		InitNoiseGenerator();
-
-
-	}
+	void Init() {InitNoiseGenerator();}
 
 	// Member variables
 	TerrainSettings settings;
@@ -218,182 +139,79 @@ private:
 	// VULKAN
     std::unique_ptr<ComputePipeline> computePipeline;
     VkPipelineLayout pipelineLayout;
-    std::unique_ptr<EngineBuffer> cubeBuffer;
+    std::unique_ptr<EngineBuffer> chunkBuffer;
 	
 // TERRAIN GENERATION //////////////////////////////////////////////////////////////
 	void GenerateChunk(int posX, int posZ, EngineDevice& engineDevice) {
-	    Chunk chunk;
-	    chunk.x = posX;
-	    chunk.z = posZ;
 
-		int offset = (settings.chunkSize-1)/2;
+	    int offset = (settings.chunkSize-1)/2;
+
+	    std::vector<CubeGPU> gpuCubes;
 
 	    for (int x = 0; x < settings.chunkSize; ++x) {
 	        for (int y = 0; y < settings.worldHeight; ++y) {
 	            for (int z = 0; z < settings.chunkSize; ++z) {
-	                Cube cube{};
-	                cube.x = x - offset + chunk.x;
-	                cube.y = y;
-	                cube.z = z - offset + chunk.z;
-	                cube.InitCorners();
 
-	                // calc corner activations
-	                for (int i = 0; i < cube.corners.size(); ++i) {
-	                    // Surface Noise
-	                    float height = cube.corners[i].y;
-	                    float surfaceHeight = settings.surfaceHeight + GetNoise2D(cube.corners[i].x, cube.corners[i].z) * settings.surfaceNoiseStrength;
-	                    bool aboveSurface = height > surfaceHeight;
-	                    float distAboveSurface = height - surfaceHeight;
+	                int cubeX = x - offset + posX;
+	                int cubeY = y;
+	                int cubeZ = z - offset + posZ;
 
-	                    // Cave holes in surface
-	                    float caveValue = GetNoise3D(cube.corners[i].x, cube.corners[i].y, cube.corners[i].z) + (height / surfaceHeight) * 0.1f;
-	                    bool isSurfaceHole = caveValue < settings.isoLevel && distAboveSurface < 1.0f && aboveSurface;
+	                CubeGPU cubeGPU;
+	                cubeGPU.position = glm::vec3(cubeX, cubeY, cubeZ); // cube position
 
-						if (height >= settings.worldHeight){
-							cube.corners[i].activation = 1;
-						}
-	                    else if (aboveSurface && !isSurfaceHole) {
-	                        cube.corners[i].activation = 1 - distAboveSurface;
-	                    } else {
-	                        cube.corners[i].activation = caveValue;
-	                    }
+	                std::vector<glm::vec3> cornerPositions;
+	                cornerPositions.push_back(glm::vec3{cubeX - 0.5f, cubeY - 0.5f, cubeZ + 0.5f});
+	                cornerPositions.push_back(glm::vec3{cubeX + 0.5f, cubeY - 0.5f, cubeZ + 0.5f});
+	                cornerPositions.push_back(glm::vec3{cubeX + 0.5f, cubeY - 0.5f, cubeZ - 0.5f});
+	                cornerPositions.push_back(glm::vec3{cubeX - 0.5f, cubeY - 0.5f, cubeZ - 0.5f});
+	                cornerPositions.push_back(glm::vec3{cubeX - 0.5f, cubeY + 0.5f, cubeZ + 0.5f});
+	                cornerPositions.push_back(glm::vec3{cubeX + 0.5f, cubeY + 0.5f, cubeZ + 0.5f});
+	                cornerPositions.push_back(glm::vec3{cubeX + 0.5f, cubeY + 0.5f, cubeZ - 0.5f});
+	                cornerPositions.push_back(glm::vec3{cubeX - 0.5f, cubeY + 0.5f, cubeZ - 0.5f});
+
+	                // Corner noise
+	                for (int i=0; i<8; ++i){
+	                    cubeGPU.Corner3DNoise.push_back(GetNoise3D(cornerPositions[i].x, cornerPositions[i].y, cornerPositions[i].z));
+	                    cubeGPU.Corner2DNoise.push_back(GetNoise2D(cornerPositions[i].x, cornerPositions[i].z));
 	                }
 
-	                // Append cube to chunk
-	                chunk.cubes.push_back(cube);
+	                // add to gpu cubes
+	                gpuCubes.push_back(cubeGPU);
 	            }
 	        }
 	    }
-		// Add chunk struct
-	    chunks.push_back(chunk);
 
-		// Add chunkObject
-		EngineGameObject terrainObject = EngineGameObject::createGameObject();
-	    terrainObject.mesh = MeshFromChunk(chunk, engineDevice);
-	    chunkObjects.push_back(std::move(terrainObject));
-	}
+	    // create buffer
+	    createCubesBuffer(gpuCubes, engineDevice);
 
-	std::shared_ptr<Mesh> MeshFromChunk(const Chunk& chunk, EngineDevice& engineDevice){
+	    // // Create a command buffer
+	    // VkCommandBufferAllocateInfo allocateInfo{};
+	    // allocateInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	    // allocateInfo.commandPool = engineDevice.getCommandPool();
+	    // allocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	    // allocateInfo.commandBufferCount = 1;
+	    // VkCommandBuffer computeCommandBuffer;
+	    // vkAllocateCommandBuffers(engineDevice.device(), &allocateInfo, &computeCommandBuffer);
+	    // VkCommandBufferBeginInfo beginInfo{};
+	    // beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	    // beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	    // vkBeginCommandBuffer(computeCommandBuffer, &beginInfo);
 
-		Mesh::Builder meshBuilder{};
+	    // // Bind to compute command buffer
+	    // vkCmdBindBuffer(computeCommandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, chunkBuffer, 0);
 
-		// Hashmap to check for duplicate vertices
-		std::unordered_map<Corner, uint32_t, CornerHasher> vertexMap;
+	    // // End recording the compute command buffer
+	    // vkEndCommandBuffer(computeCommandBuffer);
 
-		// For each cube in chunk
-		for(int j=0; j<chunk.cubes.size(); ++j){
+	    // // Submit the compute command buffer
+	    // VkSubmitInfo submitInfo{};
+	    // submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	    // submitInfo.commandBufferCount = 1;
+	    // submitInfo.pCommandBuffers = &computeCommandBuffer;
+	    // vkQueueSubmit(engineDevice.graphicsQueue(), 1, &submitInfo, VK_NULL_HANDLE);
 
-			Cube cube = chunk.cubes[j];
-			int cubeIndex = cube.getCubeIndex(settings.isoLevel);
-
-			// Append vertex buffer vertices
-			const int* TriTableRow = TriTable[cubeIndex];
-			int i = 0;
-			while(TriTableRow[i] != -1){
-				int a0 = cornerIndexAFromEdge[TriTableRow[i]];
-				int b0 = cornerIndexBFromEdge[TriTableRow[i]];
-				int a1 = cornerIndexAFromEdge[TriTableRow[i+1]];
-				int b1 = cornerIndexBFromEdge[TriTableRow[i+1]];
-				int a2 = cornerIndexAFromEdge[TriTableRow[i+2]];
-				int b2 = cornerIndexBFromEdge[TriTableRow[i+2]];
-
-				Corner p1 = VertexInterp(settings.isoLevel,cube.corners[a0], cube.corners[b0]);
-				Corner p2 = VertexInterp(settings.isoLevel,cube.corners[a1], cube.corners[b1]);
-				Corner p3 = VertexInterp(settings.isoLevel,cube.corners[a2], cube.corners[b2]);
-
-				// Calculate the normal
-				Vector3 normal = CalculateNormal(p1, p2, p3);
-
-				// Check for vertex duplicates. Vertex does not exist, add it to the hashmap and vector
-				auto it1 = vertexMap.find(p1);
-				if (it1 != vertexMap.end()) {
-				    meshBuilder.indices.push_back(it1->second);
-				} else {
-				   vertexMap[p1] = meshBuilder.vertices.size();
-				   meshBuilder.indices.push_back(meshBuilder.vertices.size());
-				   meshBuilder.vertices.push_back(ConstructVertex(p1, normal));
-				}
-
-				auto it2 = vertexMap.find(p2);
-				if (it2 != vertexMap.end()) {
-				    meshBuilder.indices.push_back(it2->second);
-				} else {
-				   vertexMap[p2] = meshBuilder.vertices.size();
-				   meshBuilder.indices.push_back(meshBuilder.vertices.size());
-				   meshBuilder.vertices.push_back(ConstructVertex(p2, normal));
-				}
-
-				auto it3 = vertexMap.find(p3);
-				if (it3 != vertexMap.end()) {
-				    meshBuilder.indices.push_back(it3->second);
-				} else {
-				   vertexMap[p3] = meshBuilder.vertices.size();
-				   meshBuilder.indices.push_back(meshBuilder.vertices.size());
-				   meshBuilder.vertices.push_back(ConstructVertex(p3, normal));
-				}
-				i+=3;
-			}
-		}
-		// Return mesh
-		return std::make_unique<Mesh>(engineDevice, meshBuilder);
-	}
-
-	Mesh::Vertex ConstructVertex(Corner p, Vector3 normal){
-		Vector2 uv = CalculateUV(p);
-		Vector3 c = CalculateColour(p.y, normal);
-		return {{p.x, p.y, p.z}, {c.x, c.y, c.z}, {normal.x, normal.y, normal.z}, {uv.x, uv.y}};
-	}
-
-	Corner VertexInterp(float isolevel, const Corner& p1, const Corner& p2) {
-		float t = (isolevel - p1.activation) / (p2.activation - p1.activation);
-		Corner p;
-		p.x = p1.x + t * (p2.x - p1.x); // Smooth
-		p.y = p1.y + t * (p2.y - p1.y);
-		p.z = p1.z + t * (p2.z - p1.z);
-		// p.x = (p1.x + p2.x)/2.0f; // Blocky
-		// p.y = (p1.y + p2.y)/2.0f;
-		// p.z = (p1.z + p2.z)/2.0f;
-		return p;
-	}
-
-	Vector3 CalculateNormal(const Corner& p1, const Corner& p2, const Corner& p3){
-		Vector3 v1(p2.x - p1.x, p2.y - p1.y, p2.z - p1.z);
-	    Vector3 v2(p3.x - p1.x, p3.y - p1.y, p3.z - p1.z);
-
-	    // Calculate the cross product
-	    Vector3 normal = v1.crossProduct(v2);
-
-	    // return the normalized vector
-	    return normal.normalized();
-	}
-
-	Vector2 CalculateUV(const Corner& Corner) {
-    	float u = Corner.x; // calculate the u coordinate based on the Corner's position
-    	float v = Corner.z; // calculate the v coordinate based on the Corner's position
-    	return Vector2(u, v);
-	}
-
-	Vector3 CalculateColour(float y, Vector3 normal){
-
-    	// Calculate the steepness of the vertice
-    	float angle = std::acos(normal.y * -1.0f) * (180.0 / 3.141592654f);
-
-    	bool isSnowHeight = (y/settings.worldHeight) > settings.snowMinHeightPercent;
-
-
-    	// Snow 
-    	if (isSnowHeight && angle < settings.snowMaxAngle)
-    	{
-    		return settings.snowColour;
-    	}
-    	else if (isSnowHeight && angle > settings.snowMaxAngle || !isSnowHeight && angle > settings.grassMaxAngle)
-    	{
-    		return settings.stoneColour;
-    	}
-    	else
-    	{
-			return settings.grassColour;
-    	}
+	    // // Wait for the completion of the compute operation
+	    // vkQueueWaitIdle(engineDevice.graphicsQueue());
 	}
 // TERRAIN GENERATION //////////////////////////////////////////////////////////////
 
@@ -450,7 +268,7 @@ private:
 		stagingBuffer.map();
 		stagingBuffer.writeToBuffer((void *) cubes.data());
 
-		cubeBuffer = std::make_unique<EngineBuffer>(
+		chunkBuffer = std::make_unique<EngineBuffer>(
 			engineDevice,
 			cubeSize,
 			cubeCount,
@@ -459,7 +277,7 @@ private:
 		);
 
 		// Copy staging buffer to vertex buffer
-		engineDevice.copyBuffer(stagingBuffer.getBuffer(), cubeBuffer->getBuffer(), bufferSize);
+		engineDevice.copyBuffer(stagingBuffer.getBuffer(), chunkBuffer->getBuffer(), bufferSize);
 	}
 };
 } // namespace
